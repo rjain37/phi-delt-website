@@ -143,7 +143,7 @@ export default function ScheduleClient() {
                       {month}
                     </div>
 
-                    <div className="flex flex-col items-center md:items-start text-center md:text-center lg:text-center lg:items-center mb-2 md:mb-0 min-w-[80px]">
+                    <div className="flex flex-col items-center md:items-start text-center md:text-center lg:text-center lg:items-center mb-2 md:mb-0 min-w-20">
                       <div className="text-sm w-full text-gray-400">
                         {day.day}
                       </div>

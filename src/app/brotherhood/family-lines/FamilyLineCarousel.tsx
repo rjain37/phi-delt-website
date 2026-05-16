@@ -68,7 +68,7 @@ export default function FamilyLineCarousel({ forest }: { forest: FamTree[] }) {
             Family Line
           </p>
 
-          <h2 className="max-w-[12rem] text-3xl font-bold gradient-text md:max-w-none">{tree.root.name}</h2>
+          <h2 className="max-w-48 text-3xl font-bold gradient-text md:max-w-none">{tree.root.name}</h2>
 
           <div className="mt-2 flex justify-center gap-4 text-sm text-white/60">
             <span>{countPeople(tree.root)} people</span>

@@ -1,3 +1,13 @@
-export { default } from "next-auth/middleware"
+import { withAuth } from "next-auth/middleware";
 
-export const config = { matcher: ["/brotherhood(.*)"] }
+export default withAuth({
+  secret: process.env.NEXTAUTH_SECRET,
+  pages: {
+    signIn: "/login",
+    error: "/login",
+  },
+});
+
+export const config = {
+  matcher: ["/brotherhood/:path*"],
+};
