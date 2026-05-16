@@ -23,7 +23,7 @@ export const authOptions = {
 
   callbacks: {
     async signIn({ user }) {
-      return Boolean(user?.email && await isAllowedEmail(user.email));
+      return user?.email && await isAllowedEmail(user.email);
     },
 
     async session({ session }) {
