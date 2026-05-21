@@ -3,6 +3,12 @@ import { isAllowedEmail } from "@/helpers/auth/access";
 
 
 export const authOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
+
+  session: {
+    strategy: "jwt",
+  },
+
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -17,11 +23,7 @@ export const authOptions = {
 
   callbacks: {
     async signIn({ user }) {
-      if (user?.email && await isAllowedEmail(user.email)) {
-        return true;
-      }
-
-      return false;
+      return user?.email && await isAllowedEmail(user.email)
     },
 
     async session({ session }) {

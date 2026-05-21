@@ -1,5 +1,10 @@
+import { Metadata } from 'next';
 import SvgTiltBackground from '@/components/SVGTiltBackground';
 import FamilyLinesDisplay from './FamilyLinesDisplay';
+
+export const metadata: Metadata = {
+  title: "Family Lines"
+}
 
 export default function FamilyLines() {
   return (

@@ -98,7 +98,7 @@ export default function NavBar() {
         "fixed top-0 left-0 w-full z-50 transition-all duration-300",
         classRegistryNav
           ? clsx(
-              "bg-[var(--navy)] border-b border-white/10 text-[var(--white)]",
+              "bg-(--navy) border-b border-white/10 text-(--white)",
               (isScrolled || isMenuOpen) && "shadow-md backdrop-blur-sm"
             )
           : {

@@ -1,6 +1,11 @@
+import { Metadata } from 'next';
 import { readFile } from "fs/promises";
 import path from "path";
 import MessengerLikesDashboard, { WrappedRow } from "./MessengerLikesDashboard";
+
+export const metadata: Metadata = {
+  title: "Messenger Stats"
+}
 
 async function loadWrappedData(): Promise<WrappedRow[]> {
   const filePath = path.join(

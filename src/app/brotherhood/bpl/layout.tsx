@@ -1,8 +1,11 @@
-"use client";
-
+import { Metadata } from 'next';
 import Background from "./Background";
 import BplNav from "./BplNav";
 import PingPongBackground from "./PingPongBackground";
+
+export const metadata: Metadata = {
+  title: "Brotherhood Pong League"
+}
 
 export default function BPLLayout({
   children,
