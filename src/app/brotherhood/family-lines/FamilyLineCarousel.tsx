@@ -51,7 +51,7 @@ export default function FamilyLineCarousel({ forest }: { forest: FamTree[] }) {
 
   return (
     <section className="glass-card relative rounded-2xl p-6 shadow-xl">
-      <div className="mb-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr) items-start gap-4">
+      <div className="flex w-full">
         <button
           type="button"
           onClick={() => setRoot(prevTree.root.name)}
@@ -63,12 +63,14 @@ export default function FamilyLineCarousel({ forest }: { forest: FamTree[] }) {
           </div>
         </button>
 
-        <div className="text-center">
+        <div className="flex-1 text-center">
           <p className="text-xs uppercase tracking-[0.25em] text-white/40">
             Family Line
           </p>
 
-          <h2 className="max-w-[12rem] text-3xl font-bold gradient-text md:max-w-none">{tree.root.name}</h2>
+          <h2 className="w-full text-3xl font-bold gradient-text">
+            {tree.root.name}
+          </h2>
 
           <div className="mt-2 flex justify-center gap-4 text-sm text-white/60">
             <span>{countPeople(tree.root)} people</span>
