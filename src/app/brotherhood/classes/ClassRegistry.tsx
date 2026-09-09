@@ -763,14 +763,22 @@ export default function ClassRegistry() {
   }, [firstPage?.semesterOptions]);
 
   const detailColumns = useCallback(
-    (entry: Entry, excludedKeys: Set<string>) =>
-      visibleColumns.filter((c: Column) => {
+    (entry: Entry, excludedKeys: Set<string>) => {
+      const professorQualityColumn = visibleColumns.find(
+        (c: Column) => isQualityColumn(c) && !isDifficultyColumn(c)
+      );
+      const hasProfessorQuality = Boolean(
+        professorQualityColumn && entry[professorQualityColumn.key]?.trim()
+      );
+
+      return visibleColumns.filter((c: Column) => {
         const v = entry[c.key]?.trim();
-        if (!v) return false;
+        if (!v && !(isProfessorColumn(c) && hasProfessorQuality)) return false;
         if (excludedKeys.has(c.key)) return false;
         if (isSublineOnlyField(c, semesterColumn)) return false;
         return true;
-      }),
+      });
+    },
     [visibleColumns, semesterColumn]
   );
 
@@ -955,7 +963,7 @@ export default function ClassRegistry() {
                   </div>
                   <dl className="flex-1 px-5 py-4 space-y-3.5">
                     {detailSegments.length === 0 ? (
-                      <div className="text-sm text-[#64748b]">
+                      <div className="text-sm text-[#64748b] italic">
                         No additional notes provided.
                       </div>
                     ) : detailSegments.map((seg) =>
@@ -970,9 +978,11 @@ export default function ClassRegistry() {
                                 {formatFieldLabel(seg.professor.label)}
                               </dt>
                               <dd className="text-(--navy) text-sm leading-relaxed">
-                                {formatCatalogVisualText(
-                                  entry[seg.professor.key]?.trim() ?? ""
-                                )}
+                                {entry[seg.professor.key]?.trim()
+                                  ? formatCatalogVisualText(
+                                      entry[seg.professor.key].trim()
+                                    )
+                                  : <p className="text-sm text-[#64748b] italic">Not provided</p>}
                               </dd>
                             </div>
                             <div className="min-w-0">
