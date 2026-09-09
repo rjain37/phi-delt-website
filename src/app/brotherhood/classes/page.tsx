@@ -17,7 +17,7 @@ export default function ClassesPage() {
             Course Catalog
           </h1>
           <p className="text-[#535B72] max-w-2xl mx-auto text-lg">
-            Peer-written notes from the chapter Google Form — find classes
+            Peer-written notes from the chapter{"'"}s registry — find classes
             others have taken and what they thought.
           </p>
         </header>

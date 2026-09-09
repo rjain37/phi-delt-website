@@ -14,27 +14,12 @@ cd phi-delt-website
 npm install
 ```
 
-Create a `.env.local` file in the **project root** (same folder as `package.json`):
-
-```env
-GOOGLE_API_KEY=
-CONFIG_SHEET_ID=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-NEXTAUTH_SECRET=
-NEXTAUTH_URL=http://localhost:3000
-```
-
-Generate `NEXTAUTH_SECRET` with:
+Secrets are managed through **Infisical**, not committed files or shared `.env`
+snippets. Request Infisical access from `phideltathetaparho@gmail.com`, then run
+the dev server with Infisical injecting the project secrets:
 
 ```bash
-openssl rand -base64 32
-```
-
-Run the dev server:
-
-```bash
-npm run dev
+infisical run -- npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -57,10 +42,12 @@ Other scripts:
 | `CONFIG_SHEET_ID` | Main chapter config spreadsheet (see [Spreadsheets](#spreadsheets)) |
 | `GOOGLE_CLIENT_ID` | OAuth client ID for brotherhood login |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Service account email for Google Sheets writes, including course review submissions |
+| `GOOGLE_PRIVATE_KEY` | Service account private key for Google Sheets writes; preserve newlines or use escaped `\n` |
 | `NEXTAUTH_SECRET` | Session encryption (required in production) |
 | `NEXTAUTH_URL` | Canonical site URL (`http://localhost:3000` locally; your Vercel domain in prod) |
 
-`.env.local` is gitignored. Never commit secrets.
+Never commit secrets, create local `.env` files for this project, or paste secret values into PRs/issues. Use Infisical for local development and hosted environment syncs. Request access from `phideltathetaparho@gmail.com`.
 
 For local Google OAuth, add `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI in [Google Cloud Console](https://console.cloud.google.com/).
 
@@ -136,13 +123,15 @@ In Google Cloud Console, for the OAuth client used by this site:
 
 1. **Authorized JavaScript origins**: `https://your-domain.com`
 2. **Authorized redirect URIs**: `https://your-domain.com/api/auth/callback/google`
-3. Set `NEXTAUTH_URL=https://your-domain.com` in your hosting env (e.g. Vercel).
+3. Set `NEXTAUTH_URL=https://your-domain.com` through Infisical for production.
 
 ---
 
 ## Spreadsheets
 
 Most content is driven by a single **config spreadsheet** (`CONFIG_SHEET_ID`). The Google Sheets API key must have access to that file (share the sheet with the service account or use a key tied to a Google account that can view it).
+
+Course Catalog submissions append directly to the `Course Catalog` tab. Share the spreadsheet with the service account used by `GOOGLE_SERVICE_ACCOUNT_EMAIL`, or set `GOOGLE_SERVICE_ACCOUNT_KEY` to the full service-account JSON instead of the split email/private-key variables.
 
 | Tab | Used for |
 |-----|----------|
@@ -166,6 +155,7 @@ Config values are cached in memory for ~60 seconds (`src/helpers/config.js`).
 ### Course Catalog (`/brotherhood/classes`)
 
 - Reads the **Course Catalog** tab; row 1 = form question headers, each following row = one submission.
+- Signed-in brothers can submit reviews from `/brotherhood/classes`; only course code, course title, semester, and reviewer name are required.
 - Search filters across visible fields; semester filter when a semester column exists.
 - Timestamp/email-style columns are hidden in the UI.
 - Navbar uses a navy theme on this route for readability.
@@ -211,11 +201,11 @@ src/
 
 ## Deployment
 
-Typical flow: connect the repo to **Vercel** (or similar), set all env vars in the dashboard, and deploy.
+Typical flow: connect the repo to **Vercel** (or similar), sync secrets from **Infisical**, and deploy.
 
 Checklist:
 
-- [ ] All env vars set (especially `NEXTAUTH_URL` and `NEXTAUTH_SECRET`)
+- [ ] Infisical has all required env vars set (especially `NEXTAUTH_URL` and `NEXTAUTH_SECRET`)
 - [ ] Google OAuth redirect URI matches production domain
 - [ ] Config spreadsheet (and BPL spreadsheet) shared with the API key’s Google account
 - [ ] `npm run build` passes locally before merging to `main`
@@ -224,7 +214,7 @@ Checklist:
 
 ## Contributing
 
-- Keep `.env.local` out of git.
+- Manage secrets through Infisical; request access from `phideltathetaparho@gmail.com`.
 - When adding brothers, update the **Access** sheet rather than hardcoding emails.
 - For new Sheet-driven pages, follow existing patterns in `src/helpers/` and `src/app/api/`.
 

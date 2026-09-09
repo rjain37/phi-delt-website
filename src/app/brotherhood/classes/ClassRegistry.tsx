@@ -1,11 +1,53 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { Star } from "lucide-react";
-import useSWR from "swr";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Dialog, DialogPanel, DialogTitle, Radio, RadioGroup } from "@headlessui/react";
+import { Plus, Star, X } from "lucide-react";
+import { useSession } from "next-auth/react";
+import useSWRInfinite from "swr/infinite";
 
 type Column = { key: string; label: string };
 type Entry = Record<string, string>;
+type CourseCatalogPage = {
+  columns: Column[];
+  entries: Entry[];
+  total: number;
+  allTotal: number;
+  hasMore: boolean;
+  semesterOptions: string[];
+};
+type ReviewForm = {
+  courseCode: string;
+  courseName: string;
+  semester: string;
+  professor: string;
+  professorQuality: string;
+  courseQuality: string;
+  difficulty: string;
+  commitment: string;
+  comments: string;
+};
+
+const initialReviewForm: ReviewForm = {
+  courseCode: "",
+  courseName: "",
+  semester: "",
+  professor: "",
+  professorQuality: "",
+  courseQuality: "",
+  difficulty: "",
+  commitment: "",
+  comments: "",
+};
+
+const commitmentOptions = [
+  "<2 hours per week",
+  "2 to 5 hours per week",
+  "5 to 8 hours per week",
+  "8 to 12 hours per week",
+  ">12 hours per week",
+];
+const PAGE_SIZE = 24;
 
 /** Timestamp / email columns — hidden in the catalog UI. */
 function isHiddenCatalogColumn(c: Column): boolean {
@@ -215,24 +257,6 @@ function buildDetailSegments(detailCols: Column[]): DetailSegment[] {
   return segments;
 }
 
-function normalize(s: string) {
-  return s.toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function entryMatchesQuery(
-  entry: Entry,
-  q: string,
-  visibleKeys: Set<string>
-) {
-  if (!q) return true;
-  const n = normalize(q);
-  for (const k of visibleKeys) {
-    const v = entry[k];
-    if (v && normalize(v).includes(n)) return true;
-  }
-  return false;
-}
-
 function columnKeyMatches(key: string, patterns: RegExp[]) {
   return patterns.some((p) => p.test(key));
 }
@@ -372,19 +396,353 @@ function renderFieldValue(col: Column, entry: Entry) {
   );
 }
 
+function StarRatingInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="block text-sm font-semibold text-(--navy)">
+          {label}
+        </span>
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="text-xs font-medium text-[#64748b] hover:text-(--navy)"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+      <RadioGroup
+        value={value}
+        onChange={onChange}
+        aria-label={label}
+        className="flex items-center gap-1"
+      >
+        {["1", "2", "3", "4", "5"].map((rating) => (
+          <Radio
+            key={rating}
+            value={rating}
+            className="group rounded-md p-1 focus:outline-none data-focus:ring-2 data-focus:ring-(--blue)"
+            title={`${rating} out of 5`}
+          >
+            {({ checked }) => {
+              const filled = Number(rating) <= Number(value || 0);
+              return (
+                <Star
+                  className={
+                    filled || checked
+                      ? "h-7 w-7 fill-(--gold) text-(--gold)"
+                      : "h-7 w-7 fill-transparent text-[#cbd5e1] group-hover:text-(--gold)"
+                  }
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+          </Radio>
+        ))}
+      </RadioGroup>
+    </div>
+  );
+}
+
+function ReviewModal({
+  open,
+  onClose,
+  onSubmitted,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmitted: () => void;
+}) {
+  const { data: session } = useSession();
+  const submitterName =
+    session?.user?.name || session?.user?.email?.split("@")[0] || "";
+  const [form, setForm] = useState<ReviewForm>(initialReviewForm);
+  const [courseNameEditable, setCourseNameEditable] = useState(false);
+  const [courseNameStatus, setCourseNameStatus] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  const setField = <K extends keyof ReviewForm>(key: K, value: ReviewForm[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const courseCode = form.courseCode.trim();
+
+    if (!courseCode) {
+      setCourseNameEditable(false);
+      setCourseNameStatus("");
+      setField("courseName", "");
+      return;
+    }
+
+    const controller = new AbortController();
+    setCourseNameStatus("Looking up course title...");
+    setCourseNameEditable(false);
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `/api/course-catalog/course-name?courseCode=${encodeURIComponent(
+            courseCode
+          )}`,
+          { signal: controller.signal }
+        );
+        if (!res.ok) throw new Error("Course lookup failed");
+        const json = await res.json();
+        const name = typeof json?.name === "string" ? json.name.trim() : "";
+        if (!name) throw new Error("Course lookup returned no title");
+        setField("courseName", name);
+        setCourseNameStatus("Course title autofilled");
+      } catch {
+        if (controller.signal.aborted) return;
+        setCourseNameEditable(true);
+        setCourseNameStatus("Course lookup failed. Enter the title manually.");
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.courseCode, open]);
+
+  async function submitReview(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/course-catalog/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Failed to submit review");
+
+      setForm(initialReviewForm);
+      setCourseNameEditable(false);
+      setCourseNameStatus("");
+      onSubmitted();
+      onClose();
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit review");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} className="relative z-50">
+      <div className="fixed inset-0 bg-(--navy)/55 backdrop-blur-sm" aria-hidden="true" />
+      <div className="fixed inset-0 overflow-y-auto px-4 py-8">
+        <div className="flex min-h-full items-center justify-center">
+          <DialogPanel className="w-full max-w-2xl rounded-lg bg-white shadow-xl border border-[#dce3ec]">
+            <div className="flex items-start justify-between gap-4 border-b border-[#e2e8f0] px-5 py-4">
+              <DialogTitle className="text-xl font-semibold text-(--navy)">
+                Add Course Review
+              </DialogTitle>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md p-1 text-[#64748b] hover:bg-[#f1f5f9] hover:text-(--navy)"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={submitReview} className="px-5 py-5 space-y-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="reviewer-name" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Reviewer
+                  </label>
+                  <input
+                    id="reviewer-name"
+                    value={submitterName}
+                    readOnly
+                    className="w-full rounded-lg border border-[#cbd5e1] bg-[#f8fafc] px-3 py-2.5 text-(--navy)"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="review-semester" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Semester
+                  </label>
+                  <input
+                    id="review-semester"
+                    required
+                    pattern="^(Fall|Spring|fall|spring)\s+(\d{2}|\d{4})$"
+                    value={form.semester}
+                    onChange={(e) => setField("semester", e.target.value)}
+                    placeholder="Spring 2026"
+                    title="Use Fall or Spring followed by a 2- or 4-digit year"
+                    className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2.5 text-(--navy) placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="course-code" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Course code
+                  </label>
+                  <input
+                    id="course-code"
+                    required
+                    inputMode="numeric"
+                    pattern="^\d{2}-?\d{3}$"
+                    value={form.courseCode}
+                    onChange={(e) => setField("courseCode", e.target.value)}
+                    placeholder="15-112"
+                    title="Use a 5-digit course code, with or without the dash"
+                    className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2.5 text-(--navy) placeholder:text-[#94a3b8] focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="course-name" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Course title
+                  </label>
+                  <input
+                    id="course-name"
+                    required
+                    value={form.courseName}
+                    onChange={(e) => setField("courseName", e.target.value)}
+                    readOnly={!courseNameEditable}
+                    placeholder="Autofilled from course code"
+                    className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2.5 text-(--navy) placeholder:text-[#94a3b8] read-only:bg-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                  />
+                  {courseNameStatus ? (
+                    <p className="mt-1.5 text-xs text-[#64748b]">{courseNameStatus}</p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="professor" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Professor
+                  </label>
+                  <input
+                    id="professor"
+                    value={form.professor}
+                    onChange={(e) => setField("professor", e.target.value)}
+                    className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2.5 text-(--navy) focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="commitment" className="block text-sm font-semibold text-(--navy) mb-2">
+                    Weekly commitment
+                  </label>
+                  <select
+                    id="commitment"
+                    value={form.commitment}
+                    onChange={(e) => setField("commitment", e.target.value)}
+                    className="w-full rounded-lg border border-[#cbd5e1] bg-white px-3 py-2.5 text-(--navy) focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                  >
+                    <option value="">Select commitment</option>
+                    {commitmentOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-3">
+                <StarRatingInput label="Course quality" value={form.courseQuality} onChange={(value) => setField("courseQuality", value)} />
+                <StarRatingInput label="Professor quality" value={form.professorQuality} onChange={(value) => setField("professorQuality", value)} />
+                <StarRatingInput label="Difficulty" value={form.difficulty} onChange={(value) => setField("difficulty", value)} />
+              </div>
+
+              <div>
+                <label htmlFor="comments" className="block text-sm font-semibold text-(--navy) mb-2">
+                  Comments
+                </label>
+                <textarea
+                  id="comments"
+                  value={form.comments}
+                  onChange={(e) => setField("comments", e.target.value)}
+                  rows={4}
+                  className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2.5 text-(--navy) focus:outline-none focus:ring-2 focus:ring-(--blue)"
+                />
+              </div>
+
+              {submitError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {submitError}
+                </p>
+              ) : null}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-md border border-[#cbd5e1] px-4 py-2 font-medium text-(--navy) hover:bg-[#f8fafc]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !submitterName}
+                  className="inline-flex items-center gap-2 rounded-md bg-(--blue) px-4 py-2 font-medium text-white hover:bg-[#4A85B0] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Plus className="h-4 w-4" />
+                  {isSubmitting ? "Submitting..." : "Submit Review"}
+                </button>
+              </div>
+            </form>
+          </DialogPanel>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
 export default function ClassRegistry() {
-  const { data, isLoading, error } = useSWR("/api/course-catalog");
+  const { status } = useSession();
   const [query, setQuery] = useState("");
   const [semester, setSemester] = useState<string>("all");
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const {
+    data: pages,
+    error,
+    isLoading,
+    isValidating,
+    mutate,
+    setSize,
+  } = useSWRInfinite<CourseCatalogPage>((pageIndex, previousPageData) => {
+    if (previousPageData && !previousPageData.hasMore) return null;
+    const params = new URLSearchParams({
+      query,
+      semester,
+      offset: String(pageIndex * PAGE_SIZE),
+      limit: String(PAGE_SIZE),
+    });
+    return `/api/course-catalog?${params.toString()}`;
+  });
+  const firstPage = pages?.[0];
+  const entries: Entry[] = useMemo(
+    () => pages?.flatMap((page) => page.entries ?? []) ?? [],
+    [pages]
+  );
+  const hasMore = Boolean(pages?.[pages.length - 1]?.hasMore);
+  const isLoadingMore = isValidating && Boolean(pages?.length);
 
   const visibleColumns = useMemo(
-    () => data ? data.columns.filter((c: Column) => !isHiddenCatalogColumn(c)) : [],
-    [data]
-  );
-
-  const visibleKeySet: Set<string> = useMemo(
-    () => new Set(visibleColumns.map((c: Column) => c.key)),
-    [visibleColumns]
+    () => firstPage ? firstPage.columns.filter((c: Column) => !isHiddenCatalogColumn(c)) : [],
+    [firstPage]
   );
 
   const columnKeys = useMemo(
@@ -401,28 +759,8 @@ export default function ClassRegistry() {
   }, [visibleColumns]);
 
   const semesterOptions = useMemo(() => {
-    if (!semesterColumn) return [];
-    const uniq = new Set<string>();
-    for (const e of data?.entries) {
-      const v = e[semesterColumn.key]?.trim();
-      if (v) uniq.add(v);
-    }
-    return [...uniq].sort();
-  }, [data?.entries, semesterColumn]);
-
-  const filtered = useMemo(() => {
-    return data ? data.entries.filter((entry: Entry) => {
-      if (!entryMatchesQuery(entry, query, visibleKeySet)) return false;
-      if (
-        semesterColumn &&
-        semester !== "all" &&
-        entry[semesterColumn.key]?.trim() !== semester
-      ) {
-        return false;
-      }
-      return true;
-    }) : [];
-  }, [data, query, semester, semesterColumn, visibleKeySet]);
+    return firstPage?.semesterOptions ?? [];
+  }, [firstPage?.semesterOptions]);
 
   const detailColumns = useCallback(
     (entry: Entry, excludedKeys: Set<string>) =>
@@ -435,6 +773,24 @@ export default function ClassRegistry() {
       }),
     [visibleColumns, semesterColumn]
   );
+
+  useEffect(() => {
+    if (!hasMore || isLoadingMore) return;
+    const node = loadMoreRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setSize((size) => size + 1);
+        }
+      },
+      { rootMargin: "600px 0px" }
+    );
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, setSize]);
 
   return (
     <>
@@ -479,14 +835,23 @@ export default function ClassRegistry() {
               </select>
             </div>
           ) : null}
+          <button
+            type="button"
+            onClick={() => setIsReviewModalOpen(true)}
+            disabled={status !== "authenticated"}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-(--blue) px-4 py-3 font-semibold text-white hover:bg-[#4A85B0] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Plus className="h-4 w-4" />
+            Add Review
+          </button>
         </div>
-        {data && (
+        {firstPage && (
           <p className="mt-4 text-sm text-[#64748b]">
             Showing{" "}
             <span className="font-semibold text-(--navy)">
-              {filtered.length}
+              {entries.length}
             </span>{" "}
-            of {data.entries.length} submissions
+            of {firstPage.total} matching submissions
           </p>
         )}
       </div>
@@ -508,18 +873,21 @@ export default function ClassRegistry() {
         </div>
       )}
 
-      {(data && !isLoading) && data.entries.length === 0 ? (
+      {(firstPage && !isLoading) && firstPage.allTotal === 0 ? (
         <div className="rounded-2xl border border-[#dce3ec] bg-white px-6 py-16 text-center text-[#64748b]">
           No rows yet in the &quot;Course Catalog&quot; sheet, or the tab is
           empty.
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-[#dce3ec] bg-white px-6 py-16 text-center text-[#64748b]">
-          No submissions match your filters. Try clearing search or semester.
-        </div>
+      ) : entries.length === 0 ? (
+        !isLoading && (
+          <div className="rounded-2xl border border-[#dce3ec] bg-white px-6 py-16 text-center text-[#64748b]">
+            No submissions match your filters. Try clearing search or semester.
+          </div>
+        )
       ) : (
-        <ul className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((entry: Entry, idx: number) => {
+        <>
+          <ul className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          {entries.map((entry: Entry, idx: number) => {
             const header = pickCourseHeader(entry, visibleColumns);
             const excludedKeys = new Set(
               [
@@ -531,6 +899,29 @@ export default function ClassRegistry() {
             const sub = sublineFor(entry, columnKeys, excludedKeys);
             const detailCols = detailColumns(entry, excludedKeys);
             const detailSegments = buildDetailSegments(detailCols);
+            const courseHref = header.code
+              ? `https://courses.scottylabs.org/course/${encodeURIComponent(
+                  header.code
+                )}`
+              : null;
+            const headerContent = (
+              <>
+                {header.code ? (
+                  <span className="text-white">{header.code}</span>
+                ) : null}
+                {header.name ? (
+                  <span
+                    className={
+                      header.code
+                        ? "text-gray-300 italic font-normal text-base tracking-tight"
+                        : "text-white font-semibold text-lg"
+                    }
+                  >
+                    {header.name}
+                  </span>
+                ) : null}
+              </>
+            );
 
             return (
               <li key={`catalog-${idx}`}>
@@ -542,20 +933,18 @@ export default function ClassRegistry() {
                       </h2>
                     ) : (
                       <h2 className="text-lg font-semibold leading-snug flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                        {header.code ? (
-                          <span className="text-white">{header.code}</span>
-                        ) : null}
-                        {header.name ? (
-                          <span
-                            className={
-                              header.code
-                                ? "text-gray-300 italic font-normal text-base tracking-tight"
-                                : "text-white font-semibold text-lg"
-                            }
+                        {courseHref ? (
+                          <a
+                            href={courseHref}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-sm hover:underline focus:outline-none focus:ring-2 focus:ring-(--light-blue)"
                           >
-                            {header.name}
-                          </span>
-                        ) : null}
+                            {headerContent}
+                          </a>
+                        ) : (
+                          headerContent
+                        )}
                       </h2>
                     )}
                     {sub ? (
@@ -565,7 +954,11 @@ export default function ClassRegistry() {
                     ) : null}
                   </div>
                   <dl className="flex-1 px-5 py-4 space-y-3.5">
-                    {detailSegments.map((seg) =>
+                    {detailSegments.length === 0 ? (
+                      <div className="text-sm text-[#64748b]">
+                        No additional notes provided.
+                      </div>
+                    ) : detailSegments.map((seg) =>
                       seg.kind === "professor-quality" ? (
                         <div
                           key={`pair-${seg.professor.key}-${seg.quality.key}`}
@@ -613,8 +1006,19 @@ export default function ClassRegistry() {
               </li>
             );
           })}
-        </ul>
+          </ul>
+          <div ref={loadMoreRef} className="flex justify-center py-8">
+            {hasMore || isLoadingMore ? (
+              <div className="h-8 w-8 border-2 border-(--blue) border-t-transparent rounded-full animate-spin" />
+            ) : null}
+          </div>
+        </>
       )}
+      <ReviewModal
+        open={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+        onSubmitted={() => mutate()}
+      />
     </>
   );
 }
